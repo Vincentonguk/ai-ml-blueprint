@@ -13,3 +13,5 @@ datasets
 sentence-transformers
 faiss-cpu
 langchain
+PyPDF2
+
