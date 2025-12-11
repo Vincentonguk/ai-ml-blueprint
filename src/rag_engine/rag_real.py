@@ -1,120 +1,108 @@
 import os
-import faiss
+import PyPDF2
+from groq import Groq
+from sentence_transformers import SentenceTransformer
 import numpy as np
-from typing import List
-from dotenv import load_dotenv
-from openai import OpenAI
-from PyPDF2 import PdfReader
+import faiss
 
-# =============================
-# 🔹 CARREGAR VARIÁVEIS DE AMBIENTE
-# =============================
-load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# ================================
+# 🔹 EMBEDDING MODEL (OPEN-SOURCE)
+# ================================
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-# =============================
-# 🔹 1) CARREGAR DOCUMENTOS
-# =============================
-def load_text_from_file(path: str) -> str:
-    if path.endswith(".txt"):
-        with open(path, "r", encoding="utf-8") as f:
+
+# ================================
+# 🔹 Carregar texto do documento
+# ================================
+def load_document(path: str) -> str:
+    ext = path.split(".")[-1].lower()
+
+    if ext == "txt":
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
             return f.read()
 
-    if path.endswith(".pdf"):
-        reader = PdfReader(path)
+    elif ext == "pdf":
+        reader = PyPDF2.PdfReader(path)
         text = ""
         for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
+            text += page.extract_text() + "\n"
         return text
 
-    raise ValueError("Formato não suportado. Use PDF ou TXT.")
+    else:
+        raise ValueError("Formato não suportado. Use PDF ou TXT.")
 
 
-# =============================
-# 🔹 2) EMBEDDINGS OPENAI
-# =============================
-def embed(texts: List[str]) -> np.ndarray:
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=texts
-    )
+# ================================
+# 🔹 Chunking (quebra em pedaços)
+# ================================
+def chunk_text(text: str, size: int = 400) -> list[str]:
+    words = text.split()
+    chunks = []
+    for i in range(0, len(words), size):
+        chunk = " ".join(words[i:i + size])
+        chunks.append(chunk)
+    return chunks
 
-    vectors = [item.embedding for item in response.data]
-    return np.array(vectors).astype("float32")
 
-
-# =============================
-# 🔹 3) VECTOR STORE COM FAISS
-# =============================
-class RAGStore:
+# ================================
+# 🔹 Vetorização (FAISS)
+# ================================
+class VectorStore:
     def __init__(self):
         self.index = None
-        self.docs = []
+        self.chunks = []
 
-    def build(self, documents: List[str]):
-        self.docs = documents
-        vectors = embed(documents)
+    def build(self, chunks: list[str]):
+        self.chunks = chunks
+        vectors = embedder.encode(chunks)
+        self.index = faiss.IndexFlatL2(vectors.shape[1])
+        self.index.add(np.array(vectors))
 
-        dim = vectors.shape[1]
-        self.index = faiss.IndexFlatL2(dim)
-        self.index.add(vectors)
-
-    def search(self, query: str, k: int = 3):
-        q_vec = embed([query])
-        distances, indices = self.index.search(q_vec, k)
-
-        return [self.docs[i] for i in indices[0]]
+    def search(self, query: str, top_k: int = 3):
+        q_vec = embedder.encode([query])
+        distances, ids = self.index.search(np.array(q_vec), top_k)
+        return [self.chunks[i] for i in ids[0]]
 
 
-# =============================
-# 🔹 4) GERAR RESPOSTA COM CONTEXTO
-# =============================
-def generate_answer(context: str, question: str) -> str:
+# ================================
+# 🔹 Geração com GROQ
+# ================================
+def generate_answer(context: str, question: str, groq_client: Groq) -> str:
     prompt = f"""
-Você é um assistente especialista.
-Use APENAS o conteúdo abaixo para responder.
+You are a RAG assistant. Use ONLY the provided context to answer.
 
-CONTEXTO:
+Context:
 {context}
 
-PERGUNTA:
+Question:
 {question}
 
-RESPOSTA:
+Answer:
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = groq_client.chat.completions.create(
+        model="llama3-70b-8192",
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=250,
-        temperature=0.2,
+        temperature=0.2
     )
 
     return response.choices[0].message.content
 
 
-# =============================
-# 🔹 5) PIPELINE RAG COMPLETO
-# =============================
-def run_rag_real(file_path: str, question: str) -> str:
-    text = load_text_from_file(file_path)
+# ================================
+# 🔹 FUNÇÃO PRINCIPAL DO RAG REAL
+# ================================
+def run_rag_real(path: str, question: str, groq_client: Groq):
+    text = load_document(path)
+    chunks = chunk_text(text)
 
-    # Quebrar em partes
-    chunks = [text[i:i+800] for i in range(0, len(text), 800)]
-
-    store = RAGStore()
+    store = VectorStore()
     store.build(chunks)
 
-    results = store.search(question)
-    context = "\n---\n".join(results)
+    top_chunks = store.search(question, top_k=3)
+    context = "\n\n".join(top_chunks)
 
-    answer = generate_answer(context, question)
+    answer = generate_answer(context, question, groq_client)
 
-    return (
-        f"📄 Documento: {file_path}\n\n"
-        f"🔍 Contexto recuperado:\n{context}\n\n"
-        f"🤖 Resposta gerada:\n{answer}"
-    )
+    return answer

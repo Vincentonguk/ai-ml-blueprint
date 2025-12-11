@@ -14,4 +14,6 @@ sentence-transformers
 faiss-cpu
 langchain
 PyPDF2
+groq
+
 

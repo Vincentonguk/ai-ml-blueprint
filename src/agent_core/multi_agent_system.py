@@ -1,164 +1,159 @@
-﻿from typing import Any, Dict, List
+﻿from groq import Groq
+
+# ==========================================
+#   CONFIG GROQ – MODELO HÍBRIDO
+# ==========================================
+
+def choose_model(task: str) -> str:
+    task = task.lower()
+
+    # Tarefas que precisam de raciocínio complexo
+    if any(x in task for x in ["planejar", "analisar", "explicar", "estratégia", "motivo"]):
+        return "llama3-70b-8192"
+
+    # Tarefas longas (RAG, documentos, resumos)
+    if any(x in task for x in ["documento", "texto", "resumo", "rag"]):
+        return "mixtral-8x7b-32768"
+
+    # Padrão (rápido)
+    return "mixtral-8x7b-32768"
 
 
-# ================================
-# 🧩 STAGES (simulação de estágios)
-# ================================
-STAGES = {
-    "nlp": {
-        "name": "NLP & LLM Engineering",
-        "description": "Processamento de linguagem natural, classificação e análise de sentimentos.",
-        "runner": lambda: "[NLP] Modelo de sentimentos carregado e analisando textos...",
-    },
-    "rag": {
-        "name": "Generative AI & RAG",
-        "description": "Busca vetorial em documentos com embeddings.",
-        "runner": lambda: "[RAG] Base vetorial criada e pronta para consultas.",
-    },
-    "agents": {
-        "name": "Agentic Systems",
-        "description": "Sistema de agentes colaborativos.",
-        "runner": lambda: "[AGENTS] Planner, Worker e Critic ativos.",
-    },
-}
+# ==========================================
+#   PLANNER
+# ==========================================
+
+class Planner:
+    def __init__(self, client: Groq):
+        self.client = client
+
+    def plan(self, goal: str):
+        model = choose_model(goal)
+
+        prompt = f"""
+Você é um planner especialista. Transforme o objetivo abaixo em 3 etapas claras.
+
+OBJETIVO:
+{goal}
+
+Responda SOMENTE em JSON:
+[
+  {{"id": 1, "name": "Stage 1", "description": "..." }},
+  {{"id": 2, "name": "Stage 2", "description": "..." }},
+  {{"id": 3, "name": "Stage 3", "description": "..." }}
+]
+"""
+
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        import json
+        try:
+            return json.loads(response.choices[0].message.content)
+        except:
+            return []
 
 
-# ================================
-# 🔍 DETECTAR ESTÁGIOS POR OBJETIVO
-# ================================
-def _detect_stages(goal: str) -> List[str]:
-    goal_lower = goal.lower()
-    stages = []
+# ==========================================
+#   WORKER
+# ==========================================
 
-    if "texto" in goal_lower or "sentimento" in goal_lower or "nlp" in goal_lower:
-        stages.append("nlp")
+class Worker:
+    def __init__(self, client: Groq):
+        self.client = client
 
-    if "rag" in goal_lower or "documento" in goal_lower or "pdf" in goal_lower:
-        stages.append("rag")
+    def execute(self, stage):
+        model = choose_model(stage["description"])
 
-    if "agente" in goal_lower or "multi" in goal_lower:
-        stages.append("agents")
+        prompt = f"""
+Você é um worker. Execute o estágio abaixo:
 
-    return stages
+NOME: {stage['name']}
+DESCRIÇÃO: {stage['description']}
 
+Explique passo a passo o que foi feito.
+"""
 
-# ================================
-# 📋 PLANNER
-# ================================
-class PlannerAgent:
-    def plan(self, goal: str) -> Dict[str, Any]:
-        stage_ids = _detect_stages(goal)
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}]
+        )
 
-        steps = []
-        for sid in stage_ids:
-            steps.append(
-                f"Rodar {STAGES[sid]['name']} para: {STAGES[sid]['description']}"
-            )
-
-        return {
-            "goal": goal,
-            "stage_ids": stage_ids,
-            "steps": steps,
-        }
+        return response.choices[0].message.content
 
 
-# ================================
-# ⚙️ WORKER
-# ================================
-class WorkerAgent:
-    def execute(self, plan: Dict[str, Any]) -> List[Dict[str, Any]]:
-        results = []
+# ==========================================
+#   CRITIC
+# ==========================================
 
-        for sid in plan["stage_ids"]:
-            info = STAGES[sid]
-            try:
-                output = info["runner"]()
-                results.append(
-                    {
-                        "stage_id": sid,
-                        "name": info["name"],
-                        "output": output,
-                        "error": None,
-                    }
-                )
-            except Exception as e:
-                results.append(
-                    {
-                        "stage_id": sid,
-                        "name": info["name"],
-                        "output": "",
-                        "error": str(e),
-                    }
-                )
+class Critic:
+    def __init__(self, client: Groq):
+        self.client = client
 
-        return results
+    def review(self, goal, plan, results):
+        model = "llama3-70b-8192"  # crítico sempre usa mais inteligência
 
+        prompt = f"""
+Você é um crítico. Avalie a execução.
 
-# ================================
-# 🧠 CRITIC
-# ================================
-class CriticAgent:
-    def review(
-        self, goal: str, plan: Dict[str, Any], results: List[Dict[str, Any]]
-    ) -> List[str]:
-        feedback = []
+OBJETIVO:
+{goal}
 
-        if not plan["stage_ids"]:
-            feedback.append("⚠️ Nenhum estágio técnico identificado para este objetivo.")
-            return feedback
+PLANO:
+{plan}
 
-        feedback.append("✅ Pipeline executado com sucesso.")
+RESULTADOS:
+{results}
 
-        if "produção" in goal.lower():
-            feedback.append("🚀 Considere adicionar pipeline de deploy e monitoramento.")
+Liste 3 melhorias possíveis.
+"""
 
-        return feedback
+        response = self.client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        return response.choices[0].message.content.split("\n")
 
 
-# ================================
-# ✅ FUNÇÃO PRINCIPAL QUE ESTAVA FALTANDO
-# ================================
-def run_multi_agent(goal: str) -> str:
-    log_lines: List[str] = []
+# ==========================================
+#   ORCHESTRATOR
+# ==========================================
 
-    log_lines.append("🤖 ALIENGBUK — SISTEMA MULTI-AGENTE")
-    log_lines.append(f"🎯 Objetivo recebido: {goal}")
-    log_lines.append("")
+def run_multi_agent(goal: str, groq_client: Groq):
+    log = []
+    log.append("🧠 Sistema Multi-Agente (Modo Híbrido GROQ Ativado)")
+    log.append(f"🎯 Objetivo: {goal}")
+    log.append("")
 
-    planner = PlannerAgent()
-    worker = WorkerAgent()
-    critic = CriticAgent()
-
-    # 1️⃣ PLANEJAMENTO
+    planner = Planner(groq_client)
     plan = planner.plan(goal)
 
-    if not plan["stage_ids"]:
-        log_lines.append("❌ Nenhum estágio compatível encontrado.")
-        return "\n".join(log_lines)
+    if not plan:
+        return "❌ O planner não conseguiu gerar um plano."
 
-    log_lines.append("📋 Plano de Execução:")
-    for step in plan["steps"]:
-        log_lines.append(f" - {step}")
+    log.append("📌 PLANO GERADO:")
+    for step in plan:
+        log.append(f"- {step['id']}: {step['name']} → {step['description']}")
 
-    log_lines.append("")
+    worker = Worker(groq_client)
+    critic = Critic(groq_client)
 
-    # 2️⃣ EXECUÇÃO
-    log_lines.append("⚙️ Execução dos Estágios:")
-    results = worker.execute(plan)
+    results = []
 
-    for r in results:
-        log_lines.append(f"\n===== {r['name']} =====")
-        if r["error"]:
-            log_lines.append(f"[ERRO] {r['error']}")
-        else:
-            log_lines.append(r["output"])
+    for stage in plan:
+        out = worker.execute(stage)
+        results.append({"name": stage["name"], "output": out})
+        log.append("\n⚙️ EXECUTADO:")
+        log.append(out)
 
-    # 3️⃣ CRÍTICA
-    log_lines.append("\n🧠 Avaliação do Critic:")
+    log.append("\n🔍 CRÍTICO:")
     feedback = critic.review(goal, plan, results)
-    for fb in feedback:
-        log_lines.append(f" - {fb}")
+    for line in feedback:
+        log.append(f"- {line}")
 
-    log_lines.append("\n🏁 Execução finalizada.")
+    log.append("\n✅ Execução Finalizada.")
 
-    return "\n".join(log_lines)
+    return "\n".join(log)
