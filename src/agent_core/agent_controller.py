@@ -4,24 +4,25 @@ import json
 
 
 # =========================================================
-#   ESCOLHA AUTOMÁTICA DO MODELO GROQ (CORRETO 2025)
+#   ESCOLHA AUTOMÁTICA DO MODELO GROQ (COMPATÍVEL 2025)
 # =========================================================
 
 def choose_model(task: str) -> str:
     """
-    Escolhe automaticamente o melhor modelo Groq
-    com base na descrição da tarefa.
+    Seleciona o modelo Groq correto baseado na tarefa.
     """
+
     text = (task or "").lower()
 
+    # Palavras que indicam raciocínio mais profundo
     reasoning_keywords = ["planejar", "analisar", "explicar", "estratégia", "motivo"]
 
-    # Raciocínio → modelo avançado real
+    # Usa modelo maior quando precisar raciocinar
     if any(x in text for x in reasoning_keywords):
-        return "llama-3.1-70b-versatile"
+        return "llama-3.3-70b-versatile"   # modelo grande e suportado
 
-    # Geral → modelo rápido
-    return "llama-3.1-8b-instant"
+    # Modelo rápido padrão
+    return "llama-3.3-8b-instant"          # modelo rápido e suportado
 
 
 
@@ -30,6 +31,8 @@ def choose_model(task: str) -> str:
 # =========================================================
 
 class Planner:
+    """ Gera um plano com 3 etapas claras. """
+
     def __init__(self, client: Groq):
         self.client = client
 
@@ -55,20 +58,28 @@ Responda SOMENTE em JSON:
             messages=[{"role": "user", "content": prompt}],
         )
 
-        content = response.choices[0].message.content.strip()
+        content = (response.choices[0].message.content or "").strip()
 
+        # Tenta JSON direto
         try:
-            return json.loads(content)
+            data = json.loads(content)
+            if isinstance(data, list):
+                return data
         except:
             pass
 
-        # fallback
+        # Extrai apenas o trecho JSON, se necessário
         try:
             start = content.find("[")
             end = content.rfind("]") + 1
-            return json.loads(content[start:end])
+            if start >= 0 and end > start:
+                data = json.loads(content[start:end])
+                if isinstance(data, list):
+                    return data
         except:
-            return []
+            pass
+
+        return []
 
 
 
@@ -77,17 +88,20 @@ Responda SOMENTE em JSON:
 # =========================================================
 
 class Worker:
+    """ Executa cada etapa do plano. """
+
     def __init__(self, client: Groq):
         self.client = client
 
     def execute(self, stage: Dict[str, Any]) -> str:
-        model = choose_model(stage.get("description", ""))
+        description = stage.get("description", "")
+        model = choose_model(description)
 
         prompt = f"""
 Você é um worker. Execute o estágio abaixo:
 
 NOME: {stage.get('name')}
-DESCRIÇÃO: {stage.get('description')}
+DESCRIÇÃO: {description}
 
 Explique passo a passo o que foi feito.
 """
@@ -97,7 +111,7 @@ Explique passo a passo o que foi feito.
             messages=[{"role": "user", "content": prompt}],
         )
 
-        return response.choices[0].message.content.strip()
+        return (response.choices[0].message.content or "").strip()
 
 
 
@@ -106,12 +120,14 @@ Explique passo a passo o que foi feito.
 # =========================================================
 
 class Critic:
+    """ Analisa o resultado e sugere melhorias. """
+
     def __init__(self, client: Groq):
         self.client = client
 
-    def review(self, goal, plan, results) -> List[str]:
+    def review(self, goal: str, plan: List[Dict[str, Any]], results: List[Dict[str, str]]) -> List[str]:
 
-        model = "llama-3.1-70b-versatile"
+        model = "llama-3.3-70b-versatile"  # crítico sempre usa modelo maior
 
         prompt = f"""
 Você é um crítico. Avalie a execução.
@@ -142,25 +158,36 @@ Responda em JSON:
 
         content = response.choices[0].message.content.strip()
 
+        # Tenta JSON direto
         try:
-            return json.loads(content)["melhorias"]
+            data = json.loads(content)
+            return data.get("melhorias", [])
         except:
-            lines = [l.strip("-• ") for l in content.split("\n") if l.strip()]
-            return lines[:3]
+            pass
+
+        # Fallback: extrair linhas
+        lines = [
+            line.strip("-• ").strip()
+            for line in content.split("\n")
+            if line.strip()
+        ]
+
+        return lines[:3]
 
 
 
 # =========================================================
-#   ORCHESTRATOR
+#   ORCHESTRATOR — SISTEMA MULTI-AGENTE
 # =========================================================
 
 def run_multi_agent(goal: str, groq_client: Groq) -> str:
-    log = []
+    log: List[str] = []
 
-    log.append("🧠 Sistema Multi-Agente (Modelos Groq Atuais)")
+    log.append("🧠 Sistema Multi-Agente (GROQ 2025 — Estável)")
     log.append(f"🎯 Objetivo: {goal}")
     log.append("")
 
+    # PLANO
     planner = Planner(groq_client)
     plan = planner.plan(goal)
 
@@ -168,13 +195,12 @@ def run_multi_agent(goal: str, groq_client: Groq) -> str:
         return "❌ O planner não conseguiu gerar um plano."
 
     log.append("📌 PLANO GERADO:")
-    for s in plan:
-        log.append(f"- {s['id']} — {s['name']}: {s['description']}")
+    for step in plan:
+        log.append(f"- {step['id']} — {step['name']}: {step['description']}")
     log.append("")
 
+    # EXECUÇÃO
     worker = Worker(groq_client)
-    critic = Critic(groq_client)
-
     results = []
 
     for stage in plan:
@@ -185,11 +211,14 @@ def run_multi_agent(goal: str, groq_client: Groq) -> str:
         log.append(output)
         log.append("")
 
+    # CRÍTICO
+    critic = Critic(groq_client)
+    log.append("🔍 CRÍTICO:")
+
     feedback = critic.review(goal, plan, results)
 
-    log.append("🔍 CRÍTICO:")
-    for f in feedback:
-        log.append(f"- {f}")
+    for item in feedback:
+        log.append(f"- {item}")
 
     log.append("")
     log.append("✅ Execução Finalizada.")
