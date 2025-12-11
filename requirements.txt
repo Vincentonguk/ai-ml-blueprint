@@ -1,4 +1,9 @@
-﻿numpy
+﻿streamlit
+python-dotenv
+openai>=1.0.0
+tavily-python
+
+numpy
 pandas
 scikit-learn
 torch
@@ -8,4 +13,3 @@ datasets
 sentence-transformers
 faiss-cpu
 langchain
-python-dotenv
