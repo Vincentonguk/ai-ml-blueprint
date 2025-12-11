@@ -3,9 +3,9 @@ from groq import Groq
 import json
 
 
-# ==========================================
-#   CONFIG GROQ – MODELO HÍBRIDO
-# ==========================================
+# =========================================================
+#   ESCOLHA AUTOMÁTICA DO MODELO GROQ (ATUALIZADO 2025)
+# =========================================================
 
 def choose_model(task: str) -> str:
     """
@@ -15,38 +15,28 @@ def choose_model(task: str) -> str:
 
     text = (task or "").lower()
 
-    # Palavras que indicam raciocínio profundo
+    # Palavras que indicam raciocínio profundo → usa modelo forte
     reasoning_keywords = ["planejar", "analisar", "explicar", "estratégia", "motivo"]
 
-    # Palavras que indicam tarefas longas
-    long_keywords = ["documento", "texto", "resumo", "rag"]
-
-    # Modelo para raciocínio complexo
     if any(x in text for x in reasoning_keywords):
-        return "llama3-70b-8192"
+        return "llama-3.1-70b-versatile"
 
-    # Modelo rápido (substituindo o Mixtral)
+    # Caso contrário, modelo rápido e barato
     return "llama-3.1-8b-instant"
 
 
 
-# ==========================================
+# =========================================================
 #   PLANNER
-# ==========================================
+# =========================================================
 
 class Planner:
-    """
-    Responsável por transformar um objetivo em um plano
-    com múltiplos estágios.
-    """
+    """ Gera um plano com 3 etapas claras. """
 
     def __init__(self, client: Groq):
         self.client = client
 
     def plan(self, goal: str) -> List[Dict[str, Any]]:
-        """
-        Gera 3 etapas claras para atingir o objetivo.
-        """
         model = choose_model(goal)
 
         prompt = f"""
@@ -70,36 +60,34 @@ Responda SOMENTE em JSON:
 
         content = (response.choices[0].message.content or "").strip()
 
-        # Tenta JSON direto
+        # JSON direto
         try:
             data = json.loads(content)
             if isinstance(data, list):
                 return data
-        except Exception:
+        except:
             pass
 
-        # Fallback — extrai trecho JSON
+        # Extrair trecho JSON
         try:
             start = content.find("[")
             end = content.rfind("]") + 1
-            if start != -1 and end != 0:
+            if start != -1 and end > start:
                 data = json.loads(content[start:end])
                 if isinstance(data, list):
                     return data
-        except Exception:
+        except:
             pass
 
         return []
 
 
-# ==========================================
+# =========================================================
 #   WORKER
-# ==========================================
+# =========================================================
 
 class Worker:
-    """
-    Executa cada estágio do plano.
-    """
+    """ Executa cada etapa do plano. """
 
     def __init__(self, client: Groq):
         self.client = client
@@ -125,14 +113,13 @@ Explique passo a passo o que foi feito.
         return (response.choices[0].message.content or "").strip()
 
 
-# ==========================================
+
+# =========================================================
 #   CRITIC
-# ==========================================
+# =========================================================
 
 class Critic:
-    """
-    Avalia o plano e a execução, sugerindo melhorias.
-    """
+    """ Avalia o trabalho e sugere melhorias. """
 
     def __init__(self, client: Groq):
         self.client = client
@@ -143,7 +130,9 @@ class Critic:
         plan: List[Dict[str, Any]],
         results: List[Dict[str, str]],
     ) -> List[str]:
-        model = "llama3-70b-8192"
+
+        # Sempre usa modelo mais inteligente
+        model = "llama-3.1-70b-versatile"
 
         prompt = f"""
 Você é um crítico. Avalie a execução.
@@ -178,28 +167,27 @@ Responda em JSON com este formato:
         try:
             data = json.loads(content)
             return [m.strip() for m in data.get("melhorias", [])]
-        except Exception:
+        except:
             pass
 
         # Fallback
-        lines = [
-            line.strip("-• ").strip()
-            for line in content.split("\n") if line.strip()
-        ]
+        lines = [line.strip("-• ").strip() for line in content.split("\n") if line.strip()]
         return lines[:3]
 
 
-# ==========================================
-#   ORCHESTRATOR
-# ==========================================
+
+# =========================================================
+#   ORCHESTRATOR — SISTEMA MULTI-AGENTE
+# =========================================================
 
 def run_multi_agent(goal: str, groq_client: Groq) -> str:
     log: List[str] = []
 
-    log.append("🧠 Sistema Multi-Agente (GROQ Modo Híbrido)")
+    log.append("🧠 Sistema Multi-Agente (GROQ 2025 — Versão Estável)")
     log.append(f"🎯 Objetivo: {goal}")
     log.append("")
 
+    # PLANNER
     planner = Planner(groq_client)
     plan = planner.plan(goal)
 
@@ -211,6 +199,7 @@ def run_multi_agent(goal: str, groq_client: Groq) -> str:
         log.append(f"- {step.get('id')} — {step.get('name')}: {step.get('description')}")
     log.append("")
 
+    # WORKER + CRITIC
     worker = Worker(groq_client)
     critic = Critic(groq_client)
 
