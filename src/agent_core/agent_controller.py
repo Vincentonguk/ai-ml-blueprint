@@ -12,22 +12,22 @@ def choose_model(task: str) -> str:
     Escolhe automaticamente o melhor modelo Groq
     com base na descrição da tarefa.
     """
+
     text = (task or "").lower()
 
-    # Tarefas que precisam de raciocínio complexo
+    # Palavras que indicam raciocínio profundo
     reasoning_keywords = ["planejar", "analisar", "explicar", "estratégia", "motivo"]
 
-    # Tarefas longas (RAG, documentos, resumos)
+    # Palavras que indicam tarefas longas
     long_keywords = ["documento", "texto", "resumo", "rag"]
 
+    # Modelo para raciocínio complexo
     if any(x in text for x in reasoning_keywords):
         return "llama3-70b-8192"
 
-    if any(x in text for x in long_keywords):
-        return "llama-3.1-8b-instant"
-
-    # Padrão (rápido)
+    # Modelo rápido (substituindo o Mixtral)
     return "llama-3.1-8b-instant"
+
 
 
 # ==========================================
