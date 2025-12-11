@@ -15,13 +15,14 @@ def choose_model(task: str) -> str:
 
     text = (task or "").lower()
 
-    # Palavras que indicam raciocínio profundo → usa modelo forte
+    # Palavras que indicam raciocínio profundo
     reasoning_keywords = ["planejar", "analisar", "explicar", "estratégia", "motivo"]
 
+    # Se precisar de raciocínio → usa o modelo mais inteligente atual
     if any(x in text for x in reasoning_keywords):
-        return "llama-3.1-70b-versatile"
+        return "llama-3.1-405b-reasoning"
 
-    # Caso contrário, modelo rápido e barato
+    # Caso contrário → modelo rápido
     return "llama-3.1-8b-instant"
 
 
@@ -82,6 +83,7 @@ Responda SOMENTE em JSON:
         return []
 
 
+
 # =========================================================
 #   WORKER
 # =========================================================
@@ -132,7 +134,7 @@ class Critic:
     ) -> List[str]:
 
         # Sempre usa modelo mais inteligente
-        model = "llama-3.1-70b-versatile"
+        model = "llama-3.1-405b-reasoning"
 
         prompt = f"""
 Você é um crítico. Avalie a execução.
