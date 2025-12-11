@@ -1,18 +1,29 @@
-﻿from groq import Groq
+from typing import List, Dict, Any
+from groq import Groq
+import json
+
 
 # ==========================================
 #   CONFIG GROQ – MODELO HÍBRIDO
 # ==========================================
 
 def choose_model(task: str) -> str:
-    task = task.lower()
+    """
+    Escolhe automaticamente o melhor modelo Groq
+    com base na descrição da tarefa.
+    """
+    text = (task or "").lower()
 
     # Tarefas que precisam de raciocínio complexo
-    if any(x in task for x in ["planejar", "analisar", "explicar", "estratégia", "motivo"]):
-        return "llama3-70b-8192"
+    reasoning_keywords = ["planejar", "analisar", "explicar", "estratégia", "motivo"]
 
     # Tarefas longas (RAG, documentos, resumos)
-    if any(x in task for x in ["documento", "texto", "resumo", "rag"]):
+    long_keywords = ["documento", "texto", "resumo", "rag"]
+
+    if any(x in text for x in reasoning_keywords):
+        return "llama3-70b-8192"
+
+    if any(x in text for x in long_keywords):
         return "mixtral-8x7b-32768"
 
     # Padrão (rápido)
@@ -24,10 +35,20 @@ def choose_model(task: str) -> str:
 # ==========================================
 
 class Planner:
+    """
+    Responsável por transformar um objetivo em um plano
+    com múltiplos estágios.
+    """
+
     def __init__(self, client: Groq):
         self.client = client
 
-    def plan(self, goal: str):
+    def plan(self, goal: str) -> List[Dict[str, Any]]:
+        """
+        Gera 3 etapas claras para atingir o objetivo.
+        Retorna uma lista de estágios no formato:
+        [{ "id": int, "name": str, "description": str }, ...]
+        """
         model = choose_model(goal)
 
         prompt = f"""
@@ -36,7 +57,7 @@ Você é um planner especialista. Transforme o objetivo abaixo em 3 etapas clara
 OBJETIVO:
 {goal}
 
-Responda SOMENTE em JSON:
+Responda SOMENTE em JSON exatamente neste formato:
 [
   {{"id": 1, "name": "Stage 1", "description": "..." }},
   {{"id": 2, "name": "Stage 2", "description": "..." }},
@@ -46,14 +67,32 @@ Responda SOMENTE em JSON:
 
         response = self.client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
 
-        import json
+        content = (response.choices[0].message.content or "").strip()
+
+        # 1) Tenta decodificar o JSON diretamente
         try:
-            return json.loads(response.choices[0].message.content)
-        except:
-            return []
+            data = json.loads(content)
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+
+        # 2) Fallback: tenta extrair apenas o trecho entre [ ... ]
+        try:
+            start = content.find("[")
+            end = content.rfind("]") + 1
+            if start != -1 and end != -1:
+                data = json.loads(content[start:end])
+                if isinstance(data, list):
+                    return data
+        except Exception:
+            pass
+
+        # 3) Se nada der certo, retorna lista vazia
+        return []
 
 
 # ==========================================
@@ -61,27 +100,35 @@ Responda SOMENTE em JSON:
 # ==========================================
 
 class Worker:
+    """
+    Executa cada estágio do plano.
+    """
+
     def __init__(self, client: Groq):
         self.client = client
 
-    def execute(self, stage):
-        model = choose_model(stage["description"])
+    def execute(self, stage: Dict[str, Any]) -> str:
+        """
+        Recebe um estágio e retorna a explicação passo a passo da execução.
+        """
+        description = stage.get("description", "")
+        model = choose_model(description)
 
         prompt = f"""
 Você é um worker. Execute o estágio abaixo:
 
-NOME: {stage['name']}
-DESCRIÇÃO: {stage['description']}
+NOME: {stage.get('name')}
+DESCRIÇÃO: {description}
 
 Explique passo a passo o que foi feito.
 """
 
         response = self.client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
 
-        return response.choices[0].message.content
+        return (response.choices[0].message.content or "").strip()
 
 
 # ==========================================
@@ -89,11 +136,23 @@ Explique passo a passo o que foi feito.
 # ==========================================
 
 class Critic:
+    """
+    Avalia o plano e a execução, sugerindo melhorias.
+    """
+
     def __init__(self, client: Groq):
         self.client = client
 
-    def review(self, goal, plan, results):
-        model = "llama3-70b-8192"  # crítico sempre usa mais inteligência
+    def review(
+        self,
+        goal: str,
+        plan: List[Dict[str, Any]],
+        results: List[Dict[str, str]],
+    ) -> List[str]:
+        """
+        Retorna uma lista com 3 melhorias possíveis.
+        """
+        model = "llama3-70b-8192"  # crítico sempre usa modelo mais inteligente
 
         prompt = f"""
 Você é um crítico. Avalie a execução.
@@ -102,32 +161,65 @@ OBJETIVO:
 {goal}
 
 PLANO:
-{plan}
+{json.dumps(plan, ensure_ascii=False, indent=2)}
 
 RESULTADOS:
-{results}
+{json.dumps(results, ensure_ascii=False, indent=2)}
 
-Liste 3 melhorias possíveis.
+Responda em JSON com EXATAMENTE este formato:
+
+{{
+  "melhorias": [
+    "Melhoria 1...",
+    "Melhoria 2...",
+    "Melhoria 3..."
+  ]
+}}
 """
 
         response = self.client.chat.completions.create(
             model=model,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
 
-        return response.choices[0].message.content.split("\n")
+        content = (response.choices[0].message.content or "").strip()
+
+        # 1) Tenta decodificar o JSON
+        try:
+            data = json.loads(content)
+            improvements = data.get("melhorias", [])
+            return [str(m).strip() for m in improvements if str(m).strip()]
+        except Exception:
+            pass
+
+        # 2) Fallback: quebra por linhas e limpa bullets
+        lines = [
+            line.strip("-• ").strip()
+            for line in content.split("\n")
+            if line.strip()
+        ]
+        return lines[:3]  # garante no máximo 3 itens
 
 
 # ==========================================
 #   ORCHESTRATOR
 # ==========================================
 
-def run_multi_agent(goal: str, groq_client: Groq):
-    log = []
-    log.append("🧠 Sistema Multi-Agente (Modo Híbrido GROQ Ativado)")
+def run_multi_agent(goal: str, groq_client: Groq) -> str:
+    """
+    Orquestra o fluxo completo:
+    - Planner gera o plano
+    - Worker executa cada estágio
+    - Critic avalia tudo
+    - Retorna um log de execução em texto
+    """
+    log: List[str] = []
+
+    log.append("🧠 Sistema Multi-Agente (GROQ Modo Híbrido)")
     log.append(f"🎯 Objetivo: {goal}")
     log.append("")
 
+    # ----- Planner -----
     planner = Planner(groq_client)
     plan = planner.plan(goal)
 
@@ -136,24 +228,34 @@ def run_multi_agent(goal: str, groq_client: Groq):
 
     log.append("📌 PLANO GERADO:")
     for step in plan:
-        log.append(f"- {step['id']}: {step['name']} → {step['description']}")
+        step_id = step.get("id")
+        name = step.get("name")
+        description = step.get("description")
+        log.append(f"- {step_id} — {name}: {description}")
+    log.append("")
 
+    # ----- Execução -----
     worker = Worker(groq_client)
     critic = Critic(groq_client)
 
-    results = []
+    results: List[Dict[str, Any]] = []
 
     for stage in plan:
-        out = worker.execute(stage)
-        results.append({"name": stage["name"], "output": out})
-        log.append("\⚙️ EXECUTADO:")
-        log.append(out)
+        output = worker.execute(stage)
+        results.append({"name": stage.get("name"), "output": output})
 
-    log.append("\n🔍 CRÍTICO:")
+        log.append("⚙️ EXECUTADO:")
+        log.append(output)
+        log.append("")
+
+    # ----- Crítico -----
+    log.append("🔍 CRÍTICO:")
     feedback = critic.review(goal, plan, results)
-    for line in feedback:
-        log.append(f"- {line}")
 
-    log.append("\n✅ Execução Finalizada.")
+    for item in feedback:
+        log.append(f"- {item}")
+
+    log.append("")
+    log.append("✅ Execução Finalizada.")
 
     return "\n".join(log)
