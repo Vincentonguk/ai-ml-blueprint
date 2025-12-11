@@ -1,0 +1,11 @@
+﻿numpy
+pandas
+scikit-learn
+torch
+torchvision
+transformers
+datasets
+sentence-transformers
+faiss-cpu
+langchain
+python-dotenv
