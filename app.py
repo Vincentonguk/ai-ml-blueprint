@@ -1,335 +1,554 @@
 ﻿import json
-import uuid
-from datetime import datetime, timezone
-from pathlib import Path
-
+import time
+import hashlib
+from dataclasses import dataclass, asdict
 import streamlit as st
 
-
-# ======================================================
+# =========================================================
 # Page Config
-# ======================================================
+# =========================================================
 st.set_page_config(
     page_title="ALIENGBUK",
     layout="centered",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed",
 )
 
-DATA_PATH = Path("data") / "memoria_aspiral.json"
-
-
-# ======================================================
-# Internal Semantic Layer (SAFE – UI ONLY)
-# ======================================================
-TEXTS = {
+# =========================================================
+# Internal Semantic Layer (v2) — single-file, safe fallback
+# =========================================================
+TEXT = {
     "pt": {
         "APP_TITLE": "🧠 ALIENGBUK",
-        "APP_TAGLINE": "Infraestrutura validada • Evolução consciente • Spiral-Up",
-        "LANG": "🌐 Idioma / Language",
-        "INTRO": (
-            "Este aplicativo é construído como um **sistema vivo**.\n\n"
-            "Nada é executado por impulso.\n"
-            "Nada é descartado sem consciência.\n\n"
-            "Cada ideia passa por **validação estrutural, semântica e temporal**."
+        "TAGLINE": "Spiral-Up • Validação antes da ação • Memória Aspiral",
+        "HOME_OK": "Streamlit está funcionando corretamente 🚀",
+        "HOME_DESC": (
+            "Este app é um **sistema em construção consciente**. "
+            "Nesta fase, tudo é **read-only**: sem execução real, sem risco."
         ),
-        "ARCH_TITLE": "🧩 Construção do App & Observações Arquiteturais",
-        "SPIRAL": (
-            "### 🌀 Evolução em Espiral (Spiral-Up)\n\n"
-            "O sistema **não evolui em ciclos fechados** nem por tentativa e erro.\n\n"
-            "Ele evolui em **espiral ascendente**:\n"
-            "- Nada é forçado onde não pertence\n"
-            "- Nada é apagado só por não servir agora\n"
-            "- O aprendizado é acumulado\n\n"
-            "O que não encaixa **não some** — vira candidato latente."
+        "LANG_LABEL": "🌐 Idioma / Language",
+        "TAB_HOME": "🏠 Home",
+        "TAB_ARCH": "🌀 Arquitetura",
+        "TAB_PIPE": "🧭 Shadow Pipeline",
+        "TAB_TRACE": "🧾 Decision Trace",
+        "TAB_MEMORY": "🗂️ Memória Aspiral",
+        "ARCH_TITLE": "🧩 Construção do Sistema (Spiral-Up)",
+        "ARCH_BODY": """
+### 🌀 Evolução em Espiral (Spiral-Up)
+O sistema evolui em **espiral ascendente** (não em loops de tentativa e erro):
+
+- O que **não encaixa** → **não executa**
+- O que **não serve agora** → **não apaga**
+- O aprendizado vira **memória contextual**
+
+### 🔍 Critérios de Encaixe
+Uma alteração só é liberada quando existe:
+- **Encaixe semântico**
+- **Encaixe estrutural**
+- **Encaixe temporal** (“é o momento certo?”)
+
+Sem os 3, o sistema **bloqueia** e registra o motivo.
+
+### 🧠 Memória Aspiral
+Ideias rejeitadas viram **candidatas latentes**.
+Quando o contexto muda e “parece” com um cenário anterior, a candidata pode ser **reativada**.
+""",
+        "PIPE_DESC": (
+            "Aqui você vê a **pipeline em modo sombra**. "
+            "Ela simula planejamento e decisões, mas **não executa comandos**."
         ),
-        "FIT": (
-            "### 🔍 Critérios de Encaixe\n\n"
-            "Antes de qualquer mudança, avaliamos:\n"
-            "- Objetivo atual\n"
-            "- Estrutura existente\n"
-            "- Dependências\n"
-            "- Segurança e impacto\n"
-            "- Momento correto\n\n"
-            "**Sem encaixe completo, não executa.**"
-        ),
-        "WAIT": (
-            "### ⛔ Quando não é o momento\n\n"
-            "Se algo não encaixa:\n"
-            "- Não executa\n"
-            "- Não quebra\n"
-            "- Não descarta\n\n"
-            "As variáveis ficam **em espera consciente**."
-        ),
-        "MEM_TITLE": "🧠 Memória Aspiral — Estrutura Viva",
-        "MEM_DESC": (
-            "Aqui você registra ideias/códigos/decisões que **não entraram agora**, "
-            "mas **não devem ser esquecidos**.\n\n"
-            "O sistema preserva candidatos para reavaliação quando o contexto ficar compatível."
-        ),
-        "STATUS": "📌 Status atual: base validada • pronto para evolução",
-        "BTN_SAVE": "💾 Salvar na Memória",
-        "BTN_EXPORT": "⬇️ Exportar JSON",
-        "BTN_IMPORT": "⬆️ Importar JSON",
-        "BTN_REFRESH": "🔄 Recarregar",
-        "FILTERS": "Filtros",
-        "LIST": "📚 Itens registrados",
-        "EMPTY": "Nenhum item ainda. Registre o primeiro candidato latente."
+        "GOAL_LABEL": "🎯 Objetivo (ex.: “verificar status do git e mostrar alterações”)",
+        "OBS_LABEL": "👁️ Observações (contexto atual, logs, ambiente, etc.)",
+        "RUN_SHADOW": "Rodar Shadow Plan (simulação)",
+        "RESULTS": "Resultados",
+        "TRACE_DESC": "Registro das decisões do sistema (por que liberou/bloqueou).",
+        "MEM_DESC": "Candidatas latentes (idéias guardadas) + reativação por similaridade.",
+        "ADD_CAND": "Adicionar candidata à memória",
+        "CAND_TITLE": "Título curto da candidata",
+        "CAND_BODY": "Descrição / snippet / ideia",
+        "CAND_TAGS": "Tags (separadas por vírgula) — ex: rag, pipeline, executor",
+        "SAVE_CAND": "Salvar candidata",
+        "SIMILARITY": "Similaridade com contexto atual",
+        "REACTIVATE": "Reativar candidata",
+        "EXPORT": "Exportar JSON (memória + trace)",
+        "IMPORT": "Importar JSON",
+        "UPLOAD": "Envie um JSON exportado anteriormente",
+        "DANGER_NOTE": "🔒 **Nenhuma execução real ocorre nesta fase.**",
+        "PIPE_SLOTS": """
+### 🧩 Slots de Pipeline (somente leitura)
+- Planner → **Conectado (simulado)**
+- Executor → **Bloqueado (sem comandos)**
+- Feedback Loop → **Ativo (trace e memória)**
+- Git → **Somente leitura (conceitual)**
+- ARG/RAG → **Preparação**
+""",
+        "STATUS": "📌 Status: Base validada • Shadow Pipeline ativo • Execução real ainda bloqueada",
     },
     "en": {
         "APP_TITLE": "🧠 ALIENGBUK",
-        "APP_TAGLINE": "Validated infrastructure • Conscious evolution • Spiral-Up",
-        "LANG": "🌐 Language / Idioma",
-        "INTRO": (
-            "This app is built as a **living system**.\n\n"
-            "Nothing runs by impulse.\n"
-            "Nothing is discarded without awareness.\n\n"
-            "Every idea goes through **structural, semantic, and temporal validation**."
+        "TAGLINE": "Spiral-Up • Validate before action • Aspiral Memory",
+        "HOME_OK": "Streamlit is working correctly 🚀",
+        "HOME_DESC": (
+            "This app is a **consciously built system**. "
+            "In this phase everything is **read-only**: no real execution, no risk."
         ),
-        "ARCH_TITLE": "🧩 App Construction & Architectural Notes",
-        "SPIRAL": (
-            "### 🌀 Spiral-Up Evolution\n\n"
-            "The system does not evolve in blind loops.\n\n"
-            "It evolves upward:\n"
-            "- Nothing is forced where it doesn't belong\n"
-            "- Nothing is deleted just because it doesn't fit yet\n"
-            "- Learning is accumulated\n\n"
-            "What doesn't fit becomes a latent candidate."
+        "LANG_LABEL": "🌐 Language / Idioma",
+        "TAB_HOME": "🏠 Home",
+        "TAB_ARCH": "🌀 Architecture",
+        "TAB_PIPE": "🧭 Shadow Pipeline",
+        "TAB_TRACE": "🧾 Decision Trace",
+        "TAB_MEMORY": "🗂️ Aspiral Memory",
+        "ARCH_TITLE": "🧩 System Construction (Spiral-Up)",
+        "ARCH_BODY": """
+### 🌀 Spiral-Up Evolution
+The system evolves in an **ascending spiral** (not closed trial-and-error loops):
+
+- If it **doesn't fit** → **do not execute**
+- If it **doesn't serve now** → **do not delete**
+- Learning becomes **contextual memory**
+
+### 🔍 Fit Criteria
+A change is allowed only when we have:
+- **Semantic fit**
+- **Structural fit**
+- **Temporal fit** (“is it the right moment?”)
+
+Without all 3, the system **blocks** and records the reason.
+
+### 🧠 Aspiral Memory
+Rejected ideas become **latent candidates**.
+When context becomes similar, they can be **reactivated**.
+""",
+        "PIPE_DESC": (
+            "This is the **shadow-mode pipeline**. "
+            "It simulates planning and decisions, but **does not run commands**."
         ),
-        "FIT": (
-            "### 🔍 Fit Criteria\n\n"
-            "Before any change:\n"
-            "- Current objective\n"
-            "- Existing structure\n"
-            "- Dependencies\n"
-            "- Safety and impact\n"
-            "- Right timing\n\n"
-            "**Without full fit, do not execute.**"
-        ),
-        "WAIT": (
-            "### ⛔ Not the right moment\n\n"
-            "If it doesn't fit:\n"
-            "- Don't execute\n"
-            "- Preserve structure\n"
-            "- Don't discard\n\n"
-            "Variables remain in **conscious waiting**."
-        ),
-        "MEM_TITLE": "🧠 Spiral Memory — Living Structure",
-        "MEM_DESC": (
-            "Register ideas/code/decisions that **didn't fit now**, "
-            "but **must not be forgotten**.\n\n"
-            "Candidates are preserved for re-evaluation when context matches."
-        ),
-        "STATUS": "📌 Current status: validated base • ready to evolve",
-        "BTN_SAVE": "💾 Save to Memory",
-        "BTN_EXPORT": "⬇️ Export JSON",
-        "BTN_IMPORT": "⬆️ Import JSON",
-        "BTN_REFRESH": "🔄 Reload",
-        "FILTERS": "Filters",
-        "LIST": "📚 Registered items",
-        "EMPTY": "No items yet. Register the first latent candidate."
-    }
+        "GOAL_LABEL": "🎯 Goal (e.g., “check git status and show changes”)",
+        "OBS_LABEL": "👁️ Observations (current context, logs, environment, etc.)",
+        "RUN_SHADOW": "Run Shadow Plan (simulation)",
+        "RESULTS": "Results",
+        "TRACE_DESC": "Decision log (why it allowed/blocked).",
+        "MEM_DESC": "Latent candidates + reactivation by similarity.",
+        "ADD_CAND": "Add candidate to memory",
+        "CAND_TITLE": "Short title",
+        "CAND_BODY": "Description / snippet / idea",
+        "CAND_TAGS": "Tags (comma-separated) — e.g., rag, pipeline, executor",
+        "SAVE_CAND": "Save candidate",
+        "SIMILARITY": "Similarity to current context",
+        "REACTIVATE": "Reactivate candidate",
+        "EXPORT": "Export JSON (memory + trace)",
+        "IMPORT": "Import JSON",
+        "UPLOAD": "Upload a previously exported JSON",
+        "DANGER_NOTE": "🔒 **No real execution happens in this phase.**",
+        "PIPE_SLOTS": """
+### 🧩 Pipeline Slots (read-only)
+- Planner → **Connected (simulated)**
+- Executor → **Blocked (no commands)**
+- Feedback Loop → **On (trace + memory)**
+- Git → **Read-only (conceptual)**
+- ARG/RAG → **Preparation**
+""",
+        "STATUS": "📌 Status: Base validated • Shadow Pipeline active • Real execution still blocked",
+    },
+    # FR/DE “beta”: fallback to EN automatically
+    "fr": {},
+    "de": {},
 }
+
+
+def t(key: str, lang: str) -> str:
+    # fallback chain: chosen -> en -> pt -> key
+    if lang in TEXT and key in TEXT[lang]:
+        return TEXT[lang][key]
+    if key in TEXT.get("en", {}):
+        return TEXT["en"][key]
+    if key in TEXT.get("pt", {}):
+        return TEXT["pt"][key]
+    return key
+
 
 LANG_MAP = {
     "Português 🇧🇷": "pt",
     "English 🇺🇸": "en",
-    "Français 🇫🇷 (beta)": "pt",
-    "Deutsch 🇩🇪 (beta)": "pt",
+    "Français 🇫🇷 (soon)": "fr",
+    "Deutsch 🇩🇪 (soon)": "de",
 }
 
-
-# ======================================================
-# Memory IO
-# ======================================================
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-
-def load_memory() -> list[dict]:
-    try:
-        if not DATA_PATH.exists():
-            DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-            DATA_PATH.write_text("[]", encoding="utf-8")
-        raw = DATA_PATH.read_text(encoding="utf-8").strip()
-        if not raw:
-            return []
-        data = json.loads(raw)
-        return data if isinstance(data, list) else []
-    except Exception:
-        # não derruba o app — apenas trabalha em memória
-        return []
-
-def save_memory(items: list[dict]) -> bool:
-    try:
-        DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DATA_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
-        return True
-    except Exception:
-        return False
-
-def merge_import(current: list[dict], imported: list[dict]) -> list[dict]:
-    # dedup por id
-    seen = {it.get("id") for it in current if isinstance(it, dict)}
-    merged = list(current)
-    for it in imported:
-        if isinstance(it, dict) and it.get("id") and it.get("id") not in seen:
-            merged.append(it)
-            seen.add(it.get("id"))
-    return merged
+# =========================================================
+# Data models
+# =========================================================
+@dataclass
+class TraceItem:
+    ts: float
+    goal: str
+    decision: str          # ALLOW / BLOCK / STORE / REACTIVATE
+    reason: str
+    stage: str             # planner / executor / feedback
+    vars: dict
 
 
-# ======================================================
-# Language Selector
-# ======================================================
-lang_label = st.selectbox(TEXTS["pt"]["LANG"], list(LANG_MAP.keys()))
-lang = LANG_MAP[lang_label]
-T = TEXTS.get(lang, TEXTS["pt"])
+@dataclass
+class Candidate:
+    id: str
+    ts: float
+    title: str
+    body: str
+    tags: list
+    last_score: float = 0.0
+    status: str = "latent"  # latent / active / archived
 
 
-# ======================================================
-# Header
-# ======================================================
-st.title(T["APP_TITLE"])
-st.caption(T["APP_TAGLINE"])
-st.success("Streamlit está funcionando corretamente 🚀")
-st.divider()
+# =========================================================
+# Session state init
+# =========================================================
+if "trace" not in st.session_state:
+    st.session_state.trace = []
+if "memory" not in st.session_state:
+    st.session_state.memory = []
+if "last_goal" not in st.session_state:
+    st.session_state.last_goal = ""
+if "last_obs" not in st.session_state:
+    st.session_state.last_obs = ""
 
 
-# ======================================================
-# Intro + Architecture
-# ======================================================
-st.write(T["INTRO"])
-st.divider()
-
-with st.expander(T["ARCH_TITLE"], expanded=True):
-    st.markdown(T["SPIRAL"])
-    st.markdown(T["FIT"])
-    st.markdown(T["WAIT"])
-
-st.divider()
+def now_ts() -> float:
+    return time.time()
 
 
-# ======================================================
-# Spiral Memory (Persistent + Export/Import)
-# ======================================================
-st.subheader(T["MEM_TITLE"])
-st.write(T["MEM_DESC"])
+def make_id(*parts: str) -> str:
+    h = hashlib.sha256(("|".join(parts) + str(now_ts())).encode("utf-8")).hexdigest()
+    return h[:12]
 
-# carregar memória uma vez por sessão
-if "aspiral_items" not in st.session_state:
-    st.session_state.aspiral_items = load_memory()
 
-colA, colB, colC = st.columns([1, 1, 1])
-
-with colA:
-    if st.button(T["BTN_REFRESH"], use_container_width=True):
-        st.session_state.aspiral_items = load_memory()
-        st.rerun()
-
-with colB:
-    export_bytes = json.dumps(st.session_state.aspiral_items, ensure_ascii=False, indent=2).encode("utf-8")
-    st.download_button(
-        label=T["BTN_EXPORT"],
-        data=export_bytes,
-        file_name="memoria_aspiral_export.json",
-        mime="application/json",
-        use_container_width=True
+def add_trace(goal: str, decision: str, reason: str, stage: str, vars_: dict):
+    st.session_state.trace.insert(
+        0,
+        TraceItem(ts=now_ts(), goal=goal, decision=decision, reason=reason, stage=stage, vars=vars_),
     )
 
-with colC:
-    uploaded = st.file_uploader(T["BTN_IMPORT"], type=["json"])
-    if uploaded is not None:
+
+def normalize(text: str) -> list:
+    # super simple tokenization (no extra deps)
+    text = (text or "").lower()
+    for ch in ".,;:!?()[]{}<>/\\|\"'`~@#$%^&*-_=+—–\n\t":
+        text = text.replace(ch, " ")
+    tokens = [w for w in text.split(" ") if w.strip()]
+    return tokens
+
+
+def jaccard(a: str, b: str) -> float:
+    A, B = set(normalize(a)), set(normalize(b))
+    if not A and not B:
+        return 0.0
+    return len(A & B) / max(1, len(A | B))
+
+
+def shadow_planner(goal: str, obs: str) -> dict:
+    """
+    Planner simulado:
+    - gera steps conceituais
+    - decide se deve BLOQUEAR (falta contexto) ou ARMAZENAR (candidato)
+    - nunca executa nada
+    """
+    goal_l = (goal or "").lower()
+    obs_l = (obs or "").lower()
+
+    steps = []
+    vars_ = {"goal_tokens": len(normalize(goal)), "obs_tokens": len(normalize(obs))}
+
+    # Heurísticas simples (sem LLM, sem API)
+    needs_git = "git" in goal_l or "commit" in goal_l or "push" in goal_l
+    needs_files = "arquivo" in goal_l or "file" in goal_l or "pasta" in goal_l or "folder" in goal_l
+    needs_api = "api" in goal_l or "openai" in goal_l or "key" in goal_l
+
+    steps.append("Interpretar objetivo e classificar intenção (git / arquivos / api / ui).")
+    steps.append("Checar se há contexto suficiente (observações).")
+    steps.append("Gerar plano conceitual em passos.")
+    steps.append("Registrar decisão no Decision Trace (ALLOW/BLOCK/STORE).")
+
+    # Regras de bloqueio (temporais/estruturais)
+    if needs_api:
+        add_trace(goal, "BLOCK", "Pedido envolve API/key. Nesta fase a execução real está bloqueada.", "planner", vars_)
+        return {
+            "status": "BLOCK",
+            "reason": "API/key solicitado — fase atual é read-only.",
+            "steps": steps,
+            "proposed_actions": ["Adicionar Secrets no Streamlit (futuro)", "Conectar LLM Planner (futuro)"],
+        }
+
+    if needs_git or needs_files:
+        # Permitimos “simular plano”, mas bloqueamos execução
+        add_trace(goal, "ALLOW", "Planejamento permitido. Execução real permanece bloqueada.", "planner", vars_)
+        proposed = []
+        if needs_git:
+            proposed += ["Simular: git status", "Simular: git diff", "Simular: criar branch/commit (apenas roteiro)"]
+        if needs_files:
+            proposed += ["Simular: mkdir / criar arquivos (apenas roteiro)"]
+        return {"status": "ALLOW", "reason": "Shadow plan ok.", "steps": steps, "proposed_actions": proposed}
+
+    # Se objetivo é muito vago, vira candidato latente
+    if len(normalize(goal)) < 4 and len(normalize(obs)) < 6:
+        add_trace(goal, "STORE", "Objetivo/observações vagos. Armazenado como candidata latente.", "planner", vars_)
+        return {
+            "status": "STORE",
+            "reason": "Pouco contexto — armazenar como candidata.",
+            "steps": steps,
+            "proposed_actions": ["Refinar objetivo", "Adicionar observações (logs/estado)"],
+        }
+
+    add_trace(goal, "ALLOW", "Planejamento permitido (genérico). Execução real bloqueada.", "planner", vars_)
+    return {
+        "status": "ALLOW",
+        "reason": "Shadow plan ok (genérico).",
+        "steps": steps,
+        "proposed_actions": ["Organizar próximos passos", "Mapear dependências"],
+    }
+
+
+def store_candidate(title: str, body: str, tags_csv: str):
+    tags = [x.strip() for x in (tags_csv or "").split(",") if x.strip()]
+    cid = make_id(title, body)
+    cand = Candidate(id=cid, ts=now_ts(), title=title.strip(), body=body.strip(), tags=tags)
+    st.session_state.memory.insert(0, cand)
+    add_trace(title, "STORE", "Candidata armazenada na memória aspiral.", "feedback", {"cid": cid, "tags": tags})
+
+
+def reactivate_candidate(cid: str):
+    for c in st.session_state.memory:
+        if c.id == cid:
+            c.status = "active"
+            add_trace(c.title, "REACTIVATE", "Candidata reativada (contexto similar).", "feedback", {"cid": cid})
+            return
+
+
+def export_state() -> str:
+    payload = {
+        "version": 2,
+        "trace": [asdict(x) for x in st.session_state.trace],
+        "memory": [asdict(x) for x in st.session_state.memory],
+        "last_goal": st.session_state.last_goal,
+        "last_obs": st.session_state.last_obs,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def import_state(raw: str):
+    data = json.loads(raw)
+    trace = data.get("trace", [])
+    memory = data.get("memory", [])
+    st.session_state.trace = [TraceItem(**x) for x in trace]
+    st.session_state.memory = [Candidate(**x) for x in memory]
+    st.session_state.last_goal = data.get("last_goal", "")
+    st.session_state.last_obs = data.get("last_obs", "")
+    add_trace("IMPORT", "ALLOW", "Estado importado com sucesso.", "feedback", {"version": data.get("version")})
+
+
+# =========================================================
+# Top bar: Language selector
+# =========================================================
+lang_label = st.selectbox(t("LANG_LABEL", "pt"), list(LANG_MAP.keys()), index=0)
+lang = LANG_MAP[lang_label]
+if lang in ("fr", "de"):
+    # fallback visible, never breaks
+    st.caption("ℹ️ FR/DE estão em modo preview. Fallback automático para EN/PT quando faltar texto.")
+
+# =========================================================
+# Header
+# =========================================================
+st.title(t("APP_TITLE", lang))
+st.caption(t("TAGLINE", lang))
+st.success(t("HOME_OK", lang))
+st.info(t("DANGER_NOTE", lang))
+st.divider()
+
+# =========================================================
+# Tabs
+# =========================================================
+tabs = st.tabs([t("TAB_HOME", lang), t("TAB_ARCH", lang), t("TAB_PIPE", lang), t("TAB_TRACE", lang), t("TAB_MEMORY", lang)])
+
+# -------------------------
+# HOME
+# -------------------------
+with tabs[0]:
+    st.write(t("HOME_DESC", lang))
+    st.markdown(t("PIPE_SLOTS", lang))
+    st.info(t("STATUS", lang))
+
+# -------------------------
+# ARCH
+# -------------------------
+with tabs[1]:
+    st.subheader(t("ARCH_TITLE", lang))
+    st.markdown(t("ARCH_BODY", lang))
+
+# -------------------------
+# SHADOW PIPELINE
+# -------------------------
+with tabs[2]:
+    st.subheader("🧭 Shadow Pipeline")
+    st.write(t("PIPE_DESC", lang))
+
+    goal = st.text_input(t("GOAL_LABEL", lang), value=st.session_state.last_goal)
+    obs = st.text_area(t("OBS_LABEL", lang), value=st.session_state.last_obs, height=140)
+
+    cols = st.columns([1, 1, 2])
+    with cols[0]:
+        run = st.button(t("RUN_SHADOW", lang), use_container_width=True)
+    with cols[1]:
+        quick_store = st.button("🌀 Store as Candidate", use_container_width=True)
+
+    if run:
+        st.session_state.last_goal = goal
+        st.session_state.last_obs = obs
+        out = shadow_planner(goal, obs)
+
+        st.markdown("### " + t("RESULTS", lang))
+        st.write(f"**Status:** `{out['status']}`")
+        st.write(f"**Reason:** {out['reason']}")
+
+        st.markdown("#### Steps")
+        for i, s in enumerate(out["steps"], 1):
+            st.write(f"{i}. {s}")
+
+        st.markdown("#### Proposed Actions (conceptual)")
+        for a in out["proposed_actions"]:
+            st.write(f"- {a}")
+
+        # Similarity scan
+        if st.session_state.memory:
+            st.markdown("#### Candidate Recall (similarity scan)")
+            ctx = f"{goal}\n{obs}"
+            top = []
+            for c in st.session_state.memory:
+                score = jaccard(ctx, c.title + " " + c.body + " " + " ".join(c.tags))
+                c.last_score = float(score)
+                top.append((score, c))
+            top.sort(key=lambda x: x[0], reverse=True)
+            for score, c in top[:5]:
+                st.write(f"- `{c.id}` • **{c.title}** • score={score:.2f} • status={c.status}")
+
+    if quick_store:
+        # store current goal/obs as a latent candidate
+        if (goal or "").strip():
+            store_candidate(
+                title=(goal.strip()[:80] + ("..." if len(goal.strip()) > 80 else "")),
+                body=(obs or "").strip() or "Sem observações.",
+                tags_csv="shadow, candidate, spiral-up",
+            )
+            st.success("Candidata criada a partir do objetivo atual ✅")
+        else:
+            st.warning("Digite um objetivo antes de armazenar.")
+
+# -------------------------
+# TRACE
+# -------------------------
+with tabs[3]:
+    st.subheader("🧾 Decision Trace")
+    st.write(t("TRACE_DESC", lang))
+
+    if not st.session_state.trace:
+        st.info("Sem decisões registradas ainda.")
+    else:
+        # Filters
+        fcols = st.columns([1, 1, 2])
+        with fcols[0]:
+            decision_filter = st.selectbox("Filtro (decision)", ["ALL", "ALLOW", "BLOCK", "STORE", "REACTIVATE"], index=0)
+        with fcols[1]:
+            stage_filter = st.selectbox("Filtro (stage)", ["ALL", "planner", "executor", "feedback"], index=0)
+
+        items = st.session_state.trace
+        if decision_filter != "ALL":
+            items = [x for x in items if x.decision == decision_filter]
+        if stage_filter != "ALL":
+            items = [x for x in items if x.stage == stage_filter]
+
+        for x in items[:50]:
+            ts_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(x.ts))
+            with st.expander(f"{ts_str} • {x.decision} • {x.stage} • {x.goal[:60]}"):
+                st.write("**Reason:**", x.reason)
+                st.code(json.dumps(x.vars, ensure_ascii=False, indent=2), language="json")
+
+    st.divider()
+    st.subheader("📦 Import / Export")
+    export_json = export_state()
+    st.download_button(
+        label=t("EXPORT", lang),
+        data=export_json.encode("utf-8"),
+        file_name="aliengbuk_state.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+
+    up = st.file_uploader(t("UPLOAD", lang), type=["json"])
+    if up is not None:
         try:
-            imported = json.loads(uploaded.read().decode("utf-8"))
-            if isinstance(imported, list):
-                st.session_state.aspiral_items = merge_import(st.session_state.aspiral_items, imported)
-                ok = save_memory(st.session_state.aspiral_items)
-                st.success("Importado e salvo ✅" if ok else "Importado (salvar no disco falhou, mas ficou na sessão) ⚠️")
-            else:
-                st.error("JSON inválido: esperado uma lista []")
+            raw = up.read().decode("utf-8")
+            import_state(raw)
+            st.success("Import OK ✅")
         except Exception as e:
             st.error(f"Falha ao importar: {e}")
 
-st.divider()
+# -------------------------
+# MEMORY
+# -------------------------
+with tabs[4]:
+    st.subheader("🗂️ Memória Aspiral")
+    st.write(t("MEM_DESC", lang))
 
-# formulário para inserir item
-with st.form("aspiral_form", clear_on_submit=True):
-    c1, c2 = st.columns(2)
+    st.markdown("### ➕ " + t("ADD_CAND", lang))
+    c1, c2 = st.columns([1, 1])
     with c1:
-        kind = st.selectbox("Tipo", ["Ideia", "Código", "Parâmetro", "Decisão", "Hipótese"])
+        title = st.text_input(t("CAND_TITLE", lang))
     with c2:
-        reason = st.selectbox("Motivo do não-encaixe", ["Contexto imaturo", "Dependências ausentes", "Risco estrutural", "Fora do objetivo atual", "Outro"])
+        tags = st.text_input(t("CAND_TAGS", lang))
 
-    title = st.text_input("Título curto (identificação)")
-    content = st.text_area("Conteúdo / Observação", placeholder="Escreva aqui o que foi analisado e por que deve ser lembrado depois…")
-    vars_line = st.text_input("Variáveis mínimas (separe por vírgula)", placeholder="ex: streamlit, import, encoding, deploy, planner")
+    body = st.text_area(t("CAND_BODY", lang), height=140)
+    if st.button(t("SAVE_CAND", lang), use_container_width=True):
+        if title.strip() and body.strip():
+            store_candidate(title, body, tags)
+            st.success("Salvo ✅")
+        else:
+            st.warning("Preencha título e descrição.")
 
-    status = st.selectbox("Status", ["Latente", "Reavaliar depois", "Aguardando dependência", "Bloqueado por risco"])
-    submitted = st.form_submit_button(T["BTN_SAVE"], use_container_width=True)
+    st.divider()
 
-    if submitted:
-        item = {
-            "id": str(uuid.uuid4()),
-            "created_at": _utc_now_iso(),
-            "kind": kind,
-            "reason": reason,
-            "status": status,
-            "title": title.strip() or f"{kind} sem título",
-            "content": content.strip(),
-            "vars": [v.strip() for v in vars_line.split(",") if v.strip()],
-        }
-        st.session_state.aspiral_items.insert(0, item)
-        ok = save_memory(st.session_state.aspiral_items)
-        st.success("Salvo ✅" if ok else "Salvo na sessão (disco indisponível) ⚠️")
+    if not st.session_state.memory:
+        st.info("Sem candidatas ainda.")
+    else:
+        ctx = (st.session_state.last_goal or "") + "\n" + (st.session_state.last_obs or "")
+        st.markdown("### 🔁 Recall (com base no contexto atual)")
+        st.caption("Contexto atual = último Goal/Observations usados no Shadow Pipeline.")
 
-st.divider()
+        # Rank by similarity
+        ranked = []
+        for c in st.session_state.memory:
+            score = jaccard(ctx, c.title + " " + c.body + " " + " ".join(c.tags))
+            c.last_score = float(score)
+            ranked.append((score, c))
+        ranked.sort(key=lambda x: x[0], reverse=True)
 
-# filtros + listagem
-with st.expander(T["FILTERS"], expanded=False):
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        f_kind = st.multiselect("Tipo", ["Ideia", "Código", "Parâmetro", "Decisão", "Hipótese"], default=[])
-    with f2:
-        f_status = st.multiselect("Status", ["Latente", "Reavaliar depois", "Aguardando dependência", "Bloqueado por risco"], default=[])
-    with f3:
-        query = st.text_input("Buscar", placeholder="ex: deploy, import, streamlit, planner")
+        for score, c in ranked[:30]:
+            header = f"{c.title}  •  score={score:.2f}  •  status={c.status}  •  id={c.id}"
+            with st.expander(header):
+                st.write(c.body)
+                if c.tags:
+                    st.caption("tags: " + ", ".join(c.tags))
+                bcols = st.columns([1, 2, 2])
+                with bcols[0]:
+                    if st.button(f"✅ {t('REACTIVATE', lang)}", key=f"react_{c.id}"):
+                        reactivate_candidate(c.id)
+                        st.success("Reativada ✅")
+                with bcols[1]:
+                    if st.button("📦 Archive", key=f"arch_{c.id}"):
+                        c.status = "archived"
+                        add_trace(c.title, "ALLOW", "Candidata arquivada manualmente.", "feedback", {"cid": c.id})
+                        st.success("Arquivada ✅")
+                with bcols[2]:
+                    if st.button("🧊 Set Latent", key=f"lat_{c.id}"):
+                        c.status = "latent"
+                        add_trace(c.title, "ALLOW", "Candidata marcada como latente.", "feedback", {"cid": c.id})
+                        st.success("Latente ✅")
 
-items = st.session_state.aspiral_items
-
-def match(it: dict) -> bool:
-    if f_kind and it.get("kind") not in f_kind:
-        return False
-    if f_status and it.get("status") not in f_status:
-        return False
-    if query:
-        q = query.lower()
-        blob = " ".join([
-            str(it.get("title","")),
-            str(it.get("content","")),
-            " ".join(it.get("vars", []))
-        ]).lower()
-        return q in blob
-    return True
-
-filtered = [it for it in items if isinstance(it, dict) and match(it)]
-
-st.subheader(T["LIST"])
-
-if not filtered:
-    st.info(T["EMPTY"])
-else:
-    for it in filtered[:200]:
-        with st.container():
-            st.markdown(f"**{it.get('title','(sem título)')}**")
-            meta = f"• {it.get('kind','')} • {it.get('status','')} • {it.get('reason','')} • {it.get('created_at','')}"
-            st.caption(meta)
-            if it.get("vars"):
-                st.code(", ".join(it["vars"]))
-            if it.get("content"):
-                st.write(it["content"])
-            st.divider()
-
-# ======================================================
-# Status + Footer
-# ======================================================
-st.info(T["STATUS"])
-st.caption("ALIENGBUK • Spiral-Up Architecture • Memória Aspiral v1 (persistência simples + export/import)")
+# =========================================================
+# Footer
+# =========================================================
+st.caption("ALIENGBUK • Spiral-Up + Shadow Pipeline + Decision Trace + Aspiral Memory (safe mode)")
